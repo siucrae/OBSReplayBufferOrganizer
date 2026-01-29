@@ -14,7 +14,8 @@ function script_description()
     return [[
 Saves replays to sub-folders using the currently focused application's executable name.
 
-Author: adapted for Windows
+Author: redraskal
+Modified by: siucrae
 ]]
 end
 
