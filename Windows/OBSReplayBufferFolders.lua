@@ -1,13 +1,26 @@
 obs = obslua
 ffi = require("ffi")
+bit = require("bit")
 
--- load the shared object (detect_game.dll)
 ffi.cdef[[
-    int get_running_game_path(char* buffer, int bufferSize);
+typedef void* HANDLE;
+typedef void* HWND;
+typedef unsigned long DWORD;
+typedef int BOOL;
+
+HWND GetForegroundWindow(void);
+DWORD GetWindowThreadProcessId(HWND hWnd, DWORD *lpdwProcessId);
+HANDLE OpenProcess(DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwProcessId);
+BOOL CloseHandle(HANDLE hObject);
+DWORD GetModuleBaseNameA(HANDLE hProcess, void* hModule, char* lpBaseName, DWORD nSize);
 ]]
 
--- load the detect_game.dll file (make sure its in the same directory as the lua script or specify the correct path)
-detect_game = ffi.load(script_path() .. "detect_game.dll")
+local user32 = ffi.load("user32")
+local kernel32 = ffi.load("kernel32")
+local psapi = ffi.load("psapi")
+
+local PROCESS_QUERY_INFORMATION = 0x0400
+local PROCESS_VM_READ = 0x0010
 
 -- description in obs
 function script_description()
@@ -28,7 +41,7 @@ end
 function obs_frontend_callback(event)
 if event == obs.OBS_FRONTEND_EVENT_REPLAY_BUFFER_SAVED then
     local path = get_replay_buffer_output()             -- get the path to the replay buffer output
-    local folder = get_running_game_title()             -- get the game title from the shared object (detect_game.dll)
+    local folder = get_focused_process_name()             -- get the game title from the shared object (detect_game.dll)
 	if path ~= nil and folder ~= nil then               -- if both the replay path and folder/game title are valid then move the file
     	print("Moving " .. path .. " to " .. folder)    -- move the replay file to the appropriate folder
         move(path, folder)
@@ -48,27 +61,36 @@ function get_replay_buffer_output()
     return path
 end
 
--- function to get the running games title using the shared object (detect_game.dll)
-function get_running_game_title()
-    local path = ffi.new("char[?]", 260)                            -- allocate a buffer to store the game path
-    local result = detect_game.get_running_game_path(path, 260)     -- call the function from the .dll library to get the running games path
+function get_focused_process_name()
+    local hwnd = user32.GetForegroundWindow()
+    if hwnd == nil then return nil end
 
-    -- if there was an error or the game path is not available then return nil
-    if result ~= 0 then
-        return nil
-    end
+    local pid = ffi.new("DWORD[1]")
+    user32.GetWindowThreadProcessId(hwnd, pid)
+    if pid[0] == 0 then return nil end
 
-    -- convert the result from C string to lua string
-	result = ffi.string(path)
-    local len = #result
+    local process = kernel32.OpenProcess(
+        bit.bor(PROCESS_QUERY_INFORMATION, PROCESS_VM_READ),
+        false,
+        pid[0]
+    )
 
-    -- if the path length is zero/no game detected then return nil
-    if len == 0 then
-        return nil
-    end
+    if process == nil then return nil end
+	
+    local buffer = ffi.new("char[260]")
+    local result = psapi.GetModuleBaseNameA(process, nil, buffer, 260)
 
-    return result
-    end
+    kernel32.CloseHandle(process)
+
+    if result == 0 then return nil end
+
+    local name = ffi.string(buffer)
+
+    -- remove .exe extension
+    name = string.gsub(name, "%.exe$", "")
+
+    return name
+end
 
 -- function to move the replay file to a new folder based on the game title
 function move(path, folder)
