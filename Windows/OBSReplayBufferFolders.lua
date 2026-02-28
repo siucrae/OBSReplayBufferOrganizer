@@ -11,7 +11,7 @@ detect_game = ffi.load(script_path() .. "detect_game.dll")
 
 -- description in obs
 function script_description()
-return [[Saves replays to sub-folders using the current fullscreen/focused video game executable name on Linux.
+return [[Saves replays to sub-folders using the current fullscreen/focused video game executable name on Windows.
 
 Author: redraskal
 (original)
@@ -48,7 +48,7 @@ function get_replay_buffer_output()
     return path
 end
 
-        -- function to get the running games title using the shared object (detect_game.dll)
+-- function to get the running games title using the shared object (detect_game.dll)
 function get_running_game_title()
     local path = ffi.new("char[?]", 260)                            -- allocate a buffer to store the game path
     local result = detect_game.get_running_game_path(path, 260)     -- call the function from the .dll library to get the running games path
@@ -72,17 +72,19 @@ function get_running_game_title()
 
 -- function to move the replay file to a new folder based on the game title
 function move(path, folder)
-	local sep = string.match(path, "^.*()/")                    -- extract the directory separator from the file path
-	local root = string.sub(path, 1, sep) .. folder             -- construct the new root directory for the game folder
-	root = string.gsub(root, "[\n\r]", "")
-	local file_name = string.sub(path, sep, string.len(path))   -- get the file name from the original path
-	local adjusted_path = root .. file_name                     -- construct the new file path with the folder
+    local sep = string.match(path, "^.*()[/\\]")  -- works for both / and \
+    if sep == nil then return end
 
-	-- check if the target directory exists; if not then create it
-	if obs.os_file_exists(root) == false then
-		obs.os_mkdir(root)
-	end
+    local base_dir = string.sub(path, 1, sep)
+    local filename = string.sub(path, sep + 1)
+
+    local new_folder = base_dir .. folder
+    local new_path = new_folder .. "\\" .. filename
+
+    if not obs.os_file_exists(new_folder) then
+        obs.os_mkdir(new_folder)
+    end
 
 	-- rename/move the file to the new location
-	obs.os_rename(path, adjusted_path)
+    obs.os_rename(path, new_path)
 end
