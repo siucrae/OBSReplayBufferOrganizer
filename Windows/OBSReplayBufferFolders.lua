@@ -13,6 +13,7 @@ DWORD GetWindowThreadProcessId(HWND hWnd, DWORD *lpdwProcessId);
 HANDLE OpenProcess(DWORD dwDesiredAccess, BOOL bInheritHandle, DWORD dwProcessId);
 BOOL CloseHandle(HANDLE hObject);
 DWORD GetModuleBaseNameA(HANDLE hProcess, void* hModule, char* lpBaseName, DWORD nSize);
+int GetWindowTextA(HWND hWnd, char* lpString, int nMaxCount);
 ]]
 
 local user32 = ffi.load("user32")
@@ -41,7 +42,7 @@ end
 function obs_frontend_callback(event)
 if event == obs.OBS_FRONTEND_EVENT_REPLAY_BUFFER_SAVED then
     local path = get_replay_buffer_output()             -- get the path to the replay buffer output
-    local folder = get_focused_process_name()             -- get the game title from the shared object (detect_game.dll)
+    local folder = get_focused_process_name()           -- get the game title from the shared object (detect_game.dll)
 	if path ~= nil and folder ~= nil then               -- if both the replay path and folder/game title are valid then move the file
     	print("Moving " .. path .. " to " .. folder)    -- move the replay file to the appropriate folder
         move(path, folder)
@@ -75,21 +76,37 @@ function get_focused_process_name()
         pid[0]
     )
 
-    if process == nil then return nil end
+    if process ~= nil then
 	
-    local buffer = ffi.new("char[260]")
-    local result = psapi.GetModuleBaseNameA(process, nil, buffer, 260)
+        local buffer = ffi.new("char[260]")
+        local result = psapi.GetModuleBaseNameA(process, nil, buffer, 260)
 
-    kernel32.CloseHandle(process)
+        kernel32.CloseHandle(process)
 
-    if result == 0 then return nil end
+        if result ~= 0 then
+            local name = ffi.string(buffer)
 
-    local name = ffi.string(buffer)
+            -- remove .exe extension
+            name = string.gsub(name, "%.exe$", "")
 
-    -- remove .exe extension
-    name = string.gsub(name, "%.exe$", "")
+            return name
+        end
+    end
 
-    return name
+    -- fallback to window title if process name cannot be read
+    local title_buffer = ffi.new("char[260]")
+    local len = user32.GetWindowTextA(hwnd, title_buffer, 260)
+
+    if len > 0 then
+        local title = ffi.string(title_buffer)
+
+        -- sanitize title for folder name
+        title = string.gsub(title, "[\\/:*?\"<>|]", "")
+
+        return title
+    end
+
+    return nil
 end
 
 -- function to move the replay file to a new folder based on the game title
